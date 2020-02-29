@@ -326,10 +326,9 @@ IOReturn VoodooI2CHIDDevice::resetHIDDevice() {
 }
 
 IOReturn VoodooI2CHIDDevice::resetHIDDeviceGated() {
-    read_in_progress = true;
     setHIDPowerState(kVoodooI2CStateOn);
-    
-    IOSleep(1);
+
+    read_in_progress = true;
 
     VoodooI2CHIDDeviceCommand command;
     command.c.reg = hid_descriptor.wCommandRegister;
@@ -337,6 +336,7 @@ IOReturn VoodooI2CHIDDevice::resetHIDDeviceGated() {
     command.c.report_type_id = 0;
     
     api->writeI2C(command.data, 4);
+	IOSleep(10);
     
     AbsoluteTime absolute_time;
 
@@ -364,6 +364,7 @@ IOReturn VoodooI2CHIDDevice::setHIDPowerState(VoodooI2CState state) {
     command.c.report_type_id = state ? I2C_HID_PWR_ON : I2C_HID_PWR_SLEEP;
 
     IOReturn ret = api->writeI2C(command.data, 4);
+	IOSleep(10);
     read_in_progress = false;
     return ret;
 }
@@ -423,7 +424,8 @@ IOReturn VoodooI2CHIDDevice::setReport(IOMemoryDescriptor* report, IOHIDReportTy
     memcpy(raw_command + length, arguments, arguments_length);
     length += arguments_length;
     IOReturn ret = api->writeI2C(raw_command, length);
-    
+	IOSleep(10);
+	
     IOFree(command, 4+arguments_length);
     IOFree(arguments, arguments_length);
 
@@ -434,10 +436,10 @@ IOReturn VoodooI2CHIDDevice::setReport(IOMemoryDescriptor* report, IOHIDReportTy
 IOReturn VoodooI2CHIDDevice::setPowerState(unsigned long whichState, IOService* whatDevice) {
     if (whatDevice != this)
         return kIOReturnInvalid;
-    if (whichState == 0) {
+    if (whichState == kVoodooI2CStateOff) {
         if (awake) {
             while (read_in_progress) {
-                IOSleep(10);
+                IOSleep(100);
             }
 
             setHIDPowerState(kVoodooI2CStateOff);
@@ -445,28 +447,29 @@ IOReturn VoodooI2CHIDDevice::setPowerState(unsigned long whichState, IOService* 
             IOLog("%s::%s Going to sleep\n", getName(), name);
             awake = false;
         }
-    } else {
+    } else if (whichState == kVoodooI2CStateOn) {
         if (!awake) {
             awake = true;
             
-            read_in_progress = true;
             setHIDPowerState(kVoodooI2CStateOn);
             
-            IOSleep(1);
-            
-            VoodooI2CHIDDeviceCommand command;
-            command.c.reg = hid_descriptor.wCommandRegister;
-            command.c.opcode = 0x01;
-            command.c.report_type_id = 0;
-            
-            api->writeI2C(command.data, 4);
+            read_in_progress = true;
+
+			VoodooI2CHIDDeviceCommand command;
+			command.c.reg = hid_descriptor.wCommandRegister;
+			command.c.opcode = 0x01;
+			command.c.report_type_id = 0;
+			
+			api->writeI2C(command.data, 4);
+			IOSleep(10);
 
             read_in_progress = false;
             
             IOLog("%s::%s Woke up\n", getName(), name);
         }
     }
-    return kIOPMAckImplied;
+	
+	return kIOPMAckImplied;
 }
 
 bool VoodooI2CHIDDevice::handleStart(IOService* provider) {
