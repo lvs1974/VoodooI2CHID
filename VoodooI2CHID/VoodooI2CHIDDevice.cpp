@@ -364,7 +364,7 @@ IOReturn VoodooI2CHIDDevice::setHIDPowerState(VoodooI2CState state) {
     command.c.report_type_id = state ? I2C_HID_PWR_ON : I2C_HID_PWR_SLEEP;
 
     IOReturn ret = api->writeI2C(command.data, 4);
-	IOSleep(10);
+	IOSleep(100);
     read_in_progress = false;
     return ret;
 }
