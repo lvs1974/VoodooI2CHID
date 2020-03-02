@@ -340,9 +340,9 @@ IOReturn VoodooI2CHIDDevice::resetHIDDeviceGated() {
     
     AbsoluteTime absolute_time;
 
-    // Device is required to complete a host-initiated reset in at most 5 seconds.
+    // Device is required to complete a host-initiated reset in at most 6 seconds.
 
-    nanoseconds_to_absolutetime(5000000000, &absolute_time);
+    nanoseconds_to_absolutetime(6000000000, &absolute_time);
 
     read_in_progress = false;
 
