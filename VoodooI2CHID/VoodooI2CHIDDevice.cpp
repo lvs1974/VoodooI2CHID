@@ -336,7 +336,7 @@ IOReturn VoodooI2CHIDDevice::resetHIDDeviceGated() {
     command.c.report_type_id = 0;
     
     api->writeI2C(command.data, 4);
-	IOSleep(10);
+	IOSleep(100);
     
     AbsoluteTime absolute_time;
 
