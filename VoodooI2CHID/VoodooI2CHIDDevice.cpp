@@ -459,9 +459,9 @@ IOReturn VoodooI2CHIDDevice::setPowerState(unsigned long whichState, IOService* 
 			command.c.reg = hid_descriptor.wCommandRegister;
 			command.c.opcode = 0x01;
 			command.c.report_type_id = 0;
-			
+
 			api->writeI2C(command.data, 4);
-			IOSleep(10);
+			IOSleep(100);
 
             read_in_progress = false;
             
