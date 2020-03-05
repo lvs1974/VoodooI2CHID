@@ -19,7 +19,7 @@
 #include <IOKit/hid/IOHIDElement.h>
 #include "../../../Dependencies/helpers.hpp"
 
-#define INTERRUPT_SIMULATOR_TIMEOUT 5
+#define INTERRUPT_SIMULATOR_TIMEOUT 14
 
 #define I2C_HID_PWR_ON  0x00
 #define I2C_HID_PWR_SLEEP 0x01
