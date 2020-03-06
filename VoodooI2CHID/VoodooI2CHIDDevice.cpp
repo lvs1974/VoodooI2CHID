@@ -22,6 +22,7 @@ bool VoodooI2CHIDDevice::init(OSDictionary* properties) {
     bool temp = false;
     reset_event = &temp;
     sim_report_buffer = 0;
+    idle_counter = 0;
     memset(&hid_descriptor, 0, sizeof(VoodooI2CHIDDeviceHIDDescriptor));
     
     client_lock = IOLockAlloc();
@@ -139,15 +140,16 @@ IOReturn VoodooI2CHIDDevice::getHIDDescriptorAddress() {
     return kIOReturnSuccess;
 }
 
-void VoodooI2CHIDDevice::getInputReport() {
+bool VoodooI2CHIDDevice::getInputReport() {
     IOBufferMemoryDescriptor* buffer;
     IOReturn ret;
     unsigned char* report = interrupt_simulator ? sim_report_buffer : (unsigned char *)IOMalloc(hid_descriptor.wMaxInputLength);
+    if (interrupt_simulator)
+        report[0] = report[1] = 0;
 
-    api->readI2C(report, hid_descriptor.wMaxInputLength);
+    ret = api->readI2C(report, hid_descriptor.wMaxInputLength);
     
-    int return_size = report[0] | report[1] << 8;
-
+    int return_size = (ret == kIOReturnSuccess) ? (report[0] | report[1] << 8) : 0;
     if (!return_size) {
         // IOLog("%s::%s Device sent a 0-length report\n", getName(), name);
         command_gate->commandWakeup(&reset_event);
@@ -178,6 +180,8 @@ exit:
     read_in_progress = false;
     if (!interrupt_simulator)
         thread_terminate(current_thread());
+    
+    return (return_size >= 14 && return_size <= hid_descriptor.wMaxInputLength && ret == kIOReturnSuccess);
 }
 
 IOReturn VoodooI2CHIDDevice::getReport(IOMemoryDescriptor* report, IOHIDReportType reportType, IOOptionBits options) {
@@ -227,13 +231,14 @@ IOReturn VoodooI2CHIDDevice::getReport(IOMemoryDescriptor* report, IOHIDReportTy
     return ret;
 }
 
-void VoodooI2CHIDDevice::interruptOccured(OSObject* owner, IOInterruptEventSource* src, int intCount) {
+bool VoodooI2CHIDDevice::interruptOccured(OSObject* owner, IOInterruptEventSource* src, int intCount) {
     if (read_in_progress)
-        return;
+        return false;
     if (!awake)
-        return;
+        return false;
     
     read_in_progress = true;
+    bool result = false;
     
     if (!interrupt_simulator) {
         thread_t new_thread;
@@ -243,10 +248,13 @@ void VoodooI2CHIDDevice::interruptOccured(OSObject* owner, IOInterruptEventSourc
             IOLog("%s::%s Thread error while attempting to get input report\n", getName(), name);
         } else {
             thread_deallocate(new_thread);
+            result = true;
         }
     } else {
-        VoodooI2CHIDDevice::getInputReport();
+        result = VoodooI2CHIDDevice::getInputReport();
     }
+    
+    return result;
 }
 
 VoodooI2CHIDDevice* VoodooI2CHIDDevice::probe(IOService* provider, SInt32* score) {
@@ -630,8 +638,11 @@ OSString* VoodooI2CHIDDevice::newManufacturerString() const {
 }
 
 void VoodooI2CHIDDevice::simulateInterrupt(OSObject* owner, IOTimerEventSource* timer) {
-    interruptOccured(owner, nullptr, 0);
-    interrupt_simulator->setTimeoutMS(INTERRUPT_SIMULATOR_TIMEOUT);
+    bool result = interruptOccured(owner, nullptr, 0);
+    if (result)
+        idle_counter = 0;
+    UInt32 timeout = (result || (++idle_counter < 500)) ? INTERRUPT_SIMULATOR_BUSY_TIMEOUT : INTERRUPT_SIMULATOR_IDLE_TIMEOUT;
+    interrupt_simulator->setTimeoutMS(timeout);
 }
 
 bool VoodooI2CHIDDevice::open(IOService *forClient, IOOptionBits options, void *arg) {

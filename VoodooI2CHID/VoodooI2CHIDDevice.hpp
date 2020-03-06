@@ -19,7 +19,8 @@
 #include <IOKit/hid/IOHIDElement.h>
 #include "../../../Dependencies/helpers.hpp"
 
-#define INTERRUPT_SIMULATOR_TIMEOUT 3
+#define INTERRUPT_SIMULATOR_BUSY_TIMEOUT 3
+#define INTERRUPT_SIMULATOR_IDLE_TIMEOUT 15
 
 #define I2C_HID_PWR_ON  0x00
 #define I2C_HID_PWR_SLEEP 0x01
@@ -250,19 +251,20 @@ class EXPORT VoodooI2CHIDDevice : public IOHIDDevice {
     bool ready_for_input;
     bool* reset_event;
     unsigned char* sim_report_buffer;
+    uint64_t idle_counter;
 
     /* Queries the I2C-HID device for an input report
      *
      * This function is called from the interrupt handler in a new thread. It is thus not called from interrupt context.
      */
 
-    void getInputReport();
+    bool getInputReport();
 
     /*
     * This function is called when the I2C-HID device asserts its interrupt line.
     */
     
-    void interruptOccured(OSObject* owner, IOInterruptEventSource* src, int intCount);
+    bool interruptOccured(OSObject* owner, IOInterruptEventSource* src, int intCount);
 
     /* Releases resources allocated in <start>
      *
