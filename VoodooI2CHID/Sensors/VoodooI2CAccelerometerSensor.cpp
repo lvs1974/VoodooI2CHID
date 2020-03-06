@@ -23,12 +23,12 @@ IOFramebuffer* VoodooI2CAccelerometerSensor::getFramebuffer() {
         display = OSDynamicCast(IODisplay, iterator->getNextObject());
         
         if (display) {
-			IOLog("%s::Got active display\n", getName());
-			IORegistryEntry *entry = display->getParentEntry(gIOServicePlane)->getParentEntry(gIOServicePlane);
-			if (entry)
-				framebuffer = reinterpret_cast<IOFramebuffer*>(entry->metaCast("IOFramebuffer"));
-			if (framebuffer)
-				IOLog("%s::Got active framebuffer\n", getName());
+            IOLog("%s::Got active display\n", getName());
+            IORegistryEntry *entry = display->getParentEntry(gIOServicePlane)->getParentEntry(gIOServicePlane);
+            if (entry)
+                framebuffer = reinterpret_cast<IOFramebuffer*>(entry->metaCast(""));
+            if (framebuffer)
+                IOLog("%s::Got active framebuffer\n", getName());
         }
         
         iterator->release();

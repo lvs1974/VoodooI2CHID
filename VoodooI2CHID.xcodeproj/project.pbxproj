@@ -86,6 +86,7 @@
 				AC0DE5E01F4FFB4B006149C8 /* Products */,
 			);
 			sourceTree = "<group>";
+			usesTabs = 0;
 		};
 		AC0DE5E01F4FFB4B006149C8 /* Products */ = {
 			isa = PBXGroup;
