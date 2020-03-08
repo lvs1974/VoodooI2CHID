@@ -20,7 +20,7 @@
 #include "../../../Dependencies/helpers.hpp"
 
 #define INTERRUPT_SIMULATOR_BUSY_TIMEOUT 3
-#define INTERRUPT_SIMULATOR_IDLE_TIMEOUT 15
+#define INTERRUPT_SIMULATOR_IDLE_TIMEOUT 30
 
 #define I2C_HID_PWR_ON  0x00
 #define I2C_HID_PWR_SLEEP 0x01
