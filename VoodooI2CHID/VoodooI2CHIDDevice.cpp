@@ -143,6 +143,9 @@ IOReturn VoodooI2CHIDDevice::getHIDDescriptorAddress() {
 bool VoodooI2CHIDDevice::getInputReport() {
     IOBufferMemoryDescriptor* buffer;
     IOReturn ret;
+    bool report_was_read = false;
+    
+repeat_read:
     unsigned char* report = interrupt_simulator ? sim_report_buffer : (unsigned char *)IOMalloc(hid_descriptor.wMaxInputLength);
     if (interrupt_simulator)
         report[0] = report[1] = 0;
@@ -175,13 +178,19 @@ bool VoodooI2CHIDDevice::getInputReport() {
     buffer->release();
     if (!interrupt_simulator)
         IOFree(report, hid_descriptor.wMaxInputLength);
+    
+    if (return_size >= 14 && return_size <= hid_descriptor.wMaxInputLength && ret == kIOReturnSuccess) {
+        report_was_read = true;
+        if (interrupt_simulator)
+            goto repeat_read;
+    }
 
 exit:
     read_in_progress = false;
     if (!interrupt_simulator)
         thread_terminate(current_thread());
     
-    return (return_size >= 14 && return_size <= hid_descriptor.wMaxInputLength && ret == kIOReturnSuccess);
+    return report_was_read;
 }
 
 IOReturn VoodooI2CHIDDevice::getReport(IOMemoryDescriptor* report, IOHIDReportType reportType, IOOptionBits options) {
@@ -641,7 +650,7 @@ void VoodooI2CHIDDevice::simulateInterrupt(OSObject* owner, IOTimerEventSource* 
     bool result = interruptOccured(owner, nullptr, 0);
     if (result)
         idle_counter = 0;
-    UInt32 timeout = (result || (++idle_counter < 500)) ? INTERRUPT_SIMULATOR_BUSY_TIMEOUT : INTERRUPT_SIMULATOR_IDLE_TIMEOUT;
+    UInt32 timeout = (result || (++idle_counter < 50)) ? INTERRUPT_SIMULATOR_BUSY_TIMEOUT : INTERRUPT_SIMULATOR_IDLE_TIMEOUT;
     interrupt_simulator->setTimeoutMS(timeout);
 }
 
