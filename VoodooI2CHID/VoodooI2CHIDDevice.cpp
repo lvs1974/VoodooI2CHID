@@ -15,7 +15,7 @@
 OSDefineMetaClassAndStructors(VoodooI2CHIDDevice, IOHIDDevice);
 
 bool i2chid_dbg = false;
-int  i2chid_mdata = 14;
+int  i2chid_mdata = 0;
 
 
 bool VoodooI2CHIDDevice::init(OSDictionary* properties) {
@@ -585,6 +585,12 @@ bool VoodooI2CHIDDevice::start(IOService* provider) {
     if (PE_parse_boot_argn("i2chid_mdata", &val, sizeof(val)) && val > 0) {
         i2chid_mdata = val;
         IOLog("%s::%s Minimal data size is overriden, new value: %d\n", getName(), name, i2chid_mdata);
+    } else {
+        OSData *data = OSDynamicCast(OSData, provider->getProperty("i2chid_mdata"));
+        if (data && data->getLength() == sizeof(int32_t)) {
+            i2chid_mdata = *static_cast<const int32_t *>(data->getBytesNoCopy());
+            IOLog("%s::%s Minimal data size is overriden in ioreg, new value: %d\n", getName(), name, i2chid_mdata);
+        }
     }
     
     setProperty("VoodooI2CServices Supported", kOSBooleanTrue);
@@ -666,7 +672,9 @@ void VoodooI2CHIDDevice::simulateInterrupt(OSObject* owner, IOTimerEventSource* 
     bool result = interruptOccured(owner, nullptr, 0);
     if (result)
         idle_counter = 0;
-    UInt32 timeout = (result || (++idle_counter < 50)) ? INTERRUPT_SIMULATOR_BUSY_TIMEOUT : INTERRUPT_SIMULATOR_IDLE_TIMEOUT;
+    UInt32 timeout = INTERRUPT_SIMULATOR_DEF_TIMEOUT;
+    if (i2chid_mdata != 0)
+         timeout = (result || (++idle_counter < 500)) ? INTERRUPT_SIMULATOR_BUSY_TIMEOUT : INTERRUPT_SIMULATOR_IDLE_TIMEOUT;
     interrupt_simulator->setTimeoutMS(timeout);
 }
 
