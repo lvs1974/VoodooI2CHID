@@ -14,6 +14,10 @@
 #define super IOHIDDevice
 OSDefineMetaClassAndStructors(VoodooI2CHIDDevice, IOHIDDevice);
 
+bool i2chid_dbg = false;
+int  i2chid_mdata = 14;
+
+
 bool VoodooI2CHIDDevice::init(OSDictionary* properties) {
     if (!super::init(properties))
         return false;
@@ -143,9 +147,7 @@ IOReturn VoodooI2CHIDDevice::getHIDDescriptorAddress() {
 bool VoodooI2CHIDDevice::getInputReport() {
     IOBufferMemoryDescriptor* buffer;
     IOReturn ret;
-    bool report_was_read = false;
     
-repeat_read:
     unsigned char* report = interrupt_simulator ? sim_report_buffer : (unsigned char *)IOMalloc(hid_descriptor.wMaxInputLength);
     if (interrupt_simulator)
         report[0] = report[1] = 0;
@@ -179,18 +181,16 @@ repeat_read:
     if (!interrupt_simulator)
         IOFree(report, hid_descriptor.wMaxInputLength);
     
-    if (return_size >= 14 && return_size <= hid_descriptor.wMaxInputLength && ret == kIOReturnSuccess) {
-        report_was_read = true;
-        if (interrupt_simulator)
-            goto repeat_read;
-    }
-
 exit:
     read_in_progress = false;
     if (!interrupt_simulator)
         thread_terminate(current_thread());
     
-    return report_was_read;
+    if (i2chid_dbg && return_size > 0 && return_size <= hid_descriptor.wMaxInputLength && ret == kIOReturnSuccess) {
+        IOLog("%s::%s Data size = %d\n", getName(), name, return_size);
+    }
+    
+    return return_size >= i2chid_mdata && return_size <= hid_descriptor.wMaxInputLength && ret == kIOReturnSuccess;
 }
 
 IOReturn VoodooI2CHIDDevice::getReport(IOMemoryDescriptor* report, IOHIDReportType reportType, IOOptionBits options) {
@@ -390,12 +390,16 @@ IOReturn VoodooI2CHIDDevice::resetHIDDeviceGated() {
 IOReturn VoodooI2CHIDDevice::setHIDPowerState(VoodooI2CState state) {
     read_in_progress = true;
     VoodooI2CHIDDeviceCommand command;
-    command.c.reg = hid_descriptor.wCommandRegister;
-    command.c.opcode = 0x08;
-    command.c.report_type_id = state ? I2C_HID_PWR_ON : I2C_HID_PWR_SLEEP;
+    IOReturn ret = kIOReturnSuccess;
+    int attempts = 3;
+    do {
+        command.c.reg = hid_descriptor.wCommandRegister;
+        command.c.opcode = 0x08;
+        command.c.report_type_id = state ? I2C_HID_PWR_ON : I2C_HID_PWR_SLEEP;
 
-    IOReturn ret = api->writeI2C(command.data, 4);
-    IOSleep(100);
+        ret = api->writeI2C(command.data, 4);
+        IOSleep(100);
+    } while (ret != kIOReturnSuccess && --attempts >= 0);
     read_in_progress = false;
     return ret;
 }
@@ -570,7 +574,19 @@ bool VoodooI2CHIDDevice::start(IOService* provider) {
         return false;
 
     ready_for_input = true;
-
+    
+    uint32_t val = 0;
+    
+    // Check if debugging is enabled
+    if (PE_parse_boot_argn("-i2chid_dbg", &val, sizeof(val)))
+        i2chid_dbg = true;
+    
+    // Check if minimal data size is overriden
+    if (PE_parse_boot_argn("i2chid_mdata", &val, sizeof(val)) && val > 0) {
+        i2chid_mdata = val;
+        IOLog("%s::%s Minimal data size is overriden, new value: %d\n", getName(), name, i2chid_mdata);
+    }
+    
     setProperty("VoodooI2CServices Supported", kOSBooleanTrue);
 
     return true;
