@@ -8,15 +8,12 @@
 
 #include <IOKit/hid/IOHIDDevice.h>
 #include <kern/locks.h>
+
 #include "VoodooI2CHIDDevice.hpp"
 #include "../../../VoodooI2C/VoodooI2C/VoodooI2CDevice/VoodooI2CDeviceNub.hpp"
 
 #define super IOHIDDevice
 OSDefineMetaClassAndStructors(VoodooI2CHIDDevice, IOHIDDevice);
-
-bool i2chid_dbg = false;
-int  i2chid_mdata = 0;
-
 
 bool VoodooI2CHIDDevice::init(OSDictionary* properties) {
     if (!super::init(properties))
@@ -27,6 +24,9 @@ bool VoodooI2CHIDDevice::init(OSDictionary* properties) {
     reset_event = &temp;
     sim_report_buffer = 0;
     idle_counter = 0;
+    i2chid_dbg = false;
+    i2chid_mdata = 0;
+    i2chid_pattern = 0;
     memset(&hid_descriptor, 0, sizeof(VoodooI2CHIDDeviceHIDDescriptor));
     
     client_lock = IOLockAlloc();
@@ -144,11 +144,29 @@ IOReturn VoodooI2CHIDDevice::getHIDDescriptorAddress() {
     return kIOReturnSuccess;
 }
 
+void VoodooI2CHIDDevice::logHexDump(const void *data, int size) const {
+    IOLog("%s::%s Buffer size = %d, hex dump:\n", getName(), name, size);
+    int lines = size / 16;
+    int bytes = size % 16;
+    const uint8_t* m = reinterpret_cast<const uint8_t*>(data);
+    for (int i=0; i<lines; ++i) {
+        IOLog("%s::%s %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n", getName(), name,
+              m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]);
+        m += 16;
+    }
+    if (bytes != 0) {
+        IOLog("%s::%s ", getName(), name);
+        for (int i=0; i<bytes; ++i)
+            IOLog("%02x ", m[i]);
+        IOLog("\n");
+    }
+}
+
 bool VoodooI2CHIDDevice::getInputReport() {
     IOBufferMemoryDescriptor* buffer;
     IOReturn ret;
     
-    unsigned char* report = interrupt_simulator ? sim_report_buffer : (unsigned char *)IOMalloc(hid_descriptor.wMaxInputLength);
+    uint8_t *report = interrupt_simulator ? sim_report_buffer : (uint8_t*)IOMalloc(hid_descriptor.wMaxInputLength);
     if (interrupt_simulator)
         report[0] = report[1] = 0;
 
@@ -185,12 +203,25 @@ exit:
     read_in_progress = false;
     if (!interrupt_simulator)
         thread_terminate(current_thread());
+  
+    if (interrupt_simulator && return_size > 0 && return_size <= hid_descriptor.wMaxInputLength && ret == kIOReturnSuccess) {
+        if (i2chid_dbg)
+            logHexDump(report, return_size);
     
-    if (i2chid_dbg && return_size > 0 && return_size <= hid_descriptor.wMaxInputLength && ret == kIOReturnSuccess) {
-        IOLog("%s::%s Data size = %d\n", getName(), name, return_size);
+        if (i2chid_pattern != 0) {
+            if (i2chid_dbg && return_size >= i2chid_pattern->getLength()) {
+                if (i2chid_pattern->isEqualTo(report, i2chid_pattern->getLength()))
+                    IOLog("%s::%s pattern matches\n", getName(), name);
+                else
+                    IOLog("%s::%s pattern does not match\n", getName(), name);
+            }
+            return (return_size >= i2chid_pattern->getLength() && i2chid_pattern->isEqualTo(report, i2chid_pattern->getLength()));
+        }
+        if (i2chid_mdata != 0) {
+            return (return_size >= i2chid_mdata);
+        }
     }
-    
-    return return_size >= i2chid_mdata && return_size <= hid_descriptor.wMaxInputLength && ret == kIOReturnSuccess;
+    return false;
 }
 
 IOReturn VoodooI2CHIDDevice::getReport(IOMemoryDescriptor* report, IOHIDReportType reportType, IOOptionBits options) {
@@ -349,6 +380,11 @@ void VoodooI2CHIDDevice::releaseResources() {
     if (sim_report_buffer) {
         IOFree(sim_report_buffer, hid_descriptor.wMaxInputLength);
         sim_report_buffer = NULL;
+    }
+    
+    if (i2chid_pattern) {
+        i2chid_pattern->release();
+        i2chid_pattern = NULL;
     }
 }
 
@@ -511,7 +547,7 @@ bool VoodooI2CHIDDevice::handleStart(IOService* provider) {
     if (!IOHIDDevice::handleStart(provider)) {
         return false;
     }
-
+    
     work_loop = getWorkLoop();
     
     if (!work_loop) {
@@ -572,8 +608,6 @@ exit:
 bool VoodooI2CHIDDevice::start(IOService* provider) {
     if (!super::start(provider))
         return false;
-
-    ready_for_input = true;
     
     uint32_t val = 0;
     
@@ -584,14 +618,41 @@ bool VoodooI2CHIDDevice::start(IOService* provider) {
     // Check if minimal data size is overriden
     if (PE_parse_boot_argn("i2chid_mdata", &val, sizeof(val)) && val > 0) {
         i2chid_mdata = val;
-        IOLog("%s::%s Minimal data size is overriden, new value: %d\n", getName(), name, i2chid_mdata);
+        IOLog("%s::%s Minimal data size is set to: %d\n", getName(), name, i2chid_mdata);
     } else {
         OSData *data = OSDynamicCast(OSData, provider->getProperty("i2chid_mdata"));
         if (data && data->getLength() == sizeof(int32_t)) {
             i2chid_mdata = *static_cast<const int32_t *>(data->getBytesNoCopy());
-            IOLog("%s::%s Minimal data size is overriden in ioreg, new value: %d\n", getName(), name, i2chid_mdata);
+            IOLog("%s::%s Minimal data size is set from ioreg to: %d\n", getName(), name, i2chid_mdata);
         }
     }
+    
+    char i2chid_pattern_str[50] = {};
+    if (PE_parse_boot_argn("_i2chid_pattern", i2chid_pattern_str, sizeof(i2chid_pattern_str)) && i2chid_pattern_str[0] != 0) {
+        uint8_t str_len = strlen(i2chid_pattern_str);
+        IOLog("%s::%s i2chid_pattern is set to: %s, len: %d\n", getName(), name, i2chid_pattern_str, str_len);
+        for (int i = 0; i < (str_len / 2); i++)
+        {
+            unsigned int byte = 0;
+            if (sscanf(&i2chid_pattern_str[2*i], "%02X", &byte) != 1)
+                break;
+            if (!i2chid_pattern)
+                i2chid_pattern = OSData::withCapacity(0);
+            i2chid_pattern->appendByte(byte, 1);
+        }
+        if (i2chid_dbg && i2chid_pattern)
+            logHexDump(i2chid_pattern->getBytesNoCopy(), i2chid_pattern->getLength());
+    } else {
+        OSData *data = OSDynamicCast(OSData, provider->getProperty("i2chid_pattern"));
+        if (data != 0 && data->getLength() != 0) {
+            i2chid_pattern = OSData::withData(data);
+            IOLog("%s::%s i2chid_pattern is set to value from ioreg, len: %d\n", getName(), name, i2chid_pattern->getLength());
+            if (i2chid_dbg)
+                logHexDump(i2chid_pattern->getBytesNoCopy(), i2chid_pattern->getLength());
+        }
+    }
+    
+    ready_for_input = true;
     
     setProperty("VoodooI2CServices Supported", kOSBooleanTrue);
 
@@ -673,7 +734,7 @@ void VoodooI2CHIDDevice::simulateInterrupt(OSObject* owner, IOTimerEventSource* 
     if (result)
         idle_counter = 0;
     UInt32 timeout = INTERRUPT_SIMULATOR_DEF_TIMEOUT;
-    if (i2chid_mdata != 0)
+    if (i2chid_mdata != 0 || i2chid_pattern != 0)
          timeout = (result || (++idle_counter < 500)) ? INTERRUPT_SIMULATOR_BUSY_TIMEOUT : INTERRUPT_SIMULATOR_IDLE_TIMEOUT;
     interrupt_simulator->setTimeoutMS(timeout);
 }

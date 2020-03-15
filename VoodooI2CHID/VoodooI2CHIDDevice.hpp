@@ -253,6 +253,9 @@ class EXPORT VoodooI2CHIDDevice : public IOHIDDevice {
     bool* reset_event;
     unsigned char* sim_report_buffer;
     uint64_t idle_counter;
+    bool i2chid_dbg;
+    int  i2chid_mdata;
+    OSData *i2chid_pattern;
 
     /* Queries the I2C-HID device for an input report
      *
@@ -274,6 +277,13 @@ class EXPORT VoodooI2CHIDDevice : public IOHIDDevice {
      */
 
     void releaseResources();
+  
+    /* Helper function to print hex dump to log
+     *
+     * Prints hex dump for buffer
+     */
+    
+    void logHexDump(const void *data, int return_size) const;
 };
 
 
